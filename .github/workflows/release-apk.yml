@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gasm gcc-multilib g++-multilib \
+          sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev
 
       - name: Clone OpenWrt 25.12 Source
