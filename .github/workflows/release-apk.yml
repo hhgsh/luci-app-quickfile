@@ -1,5 +1,4 @@
-name: Build and Release OpenWrt 25.12 APK
-
+name: Build quickfile
 on:
   push:
     tags:
