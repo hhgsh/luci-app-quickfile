@@ -1,0 +1,66 @@
+name: Build and Release OpenWrt 25.12 APK
+
+on:
+  push:
+    tags:
+      - 'v*' # 匹配以 'v' 开头的标签，例如 v1.0, v2.1.0 等
+  workflow_dispatch: # 保留手动触发能力
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # 必须赋予写入权限以创建 Release 和上传文件
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          path: 'luci-app-quickfile'
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison gasm gcc-multilib g++-multilib \
+            gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev
+
+      - name: Clone OpenWrt 25.12 Source
+        run: |
+          git clone --depth 1 -b openwrt-25.12 https://git.openwrt.org/openwrt/openwrt.git openwrt
+          mv luci-app-quickfile openwrt/package/luci-app-quickfile
+
+      - name: Update and Install Feeds
+        cd: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate Configuration
+        cd: openwrt
+        run: |
+          echo "CONFIG_TARGET_x86=y" > .config
+          echo "CONFIG_TARGET_x86_64=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
+          make defconfig
+
+      - name: Compile Package
+        cd: openwrt
+        run: |
+          make package/luci-app-quickfile/compile V=s -j$(nproc)
+
+      - name: Organize Artifacts
+        run: |
+          mkdir -p output
+          find openwrt/bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: output/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
