@@ -1,4 +1,3 @@
-name: Build quickfile
 on:
   push:
     tags:
@@ -45,9 +44,11 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
           make defconfig
 
-      - name: Compile Package
+      - name: Build Host Tools & Compile Package
         working-directory: openwrt
         run: |
+          make tools/install -j$(nproc)
+          make toolchain/install -j$(nproc)
           make package/luci-app-quickfile/compile V=s -j$(nproc)
 
       - name: Organize Artifacts
