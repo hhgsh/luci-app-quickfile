@@ -3,14 +3,14 @@ name: Build and Release OpenWrt 25.12 APK
 on:
   push:
     tags:
-      - 'v*' # 匹配以 'v' 开头的标签，例如 v1.0, v2.1.0 等
-  workflow_dispatch: # 保留手动触发能力
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-and-release:
     runs-on: ubuntu-22.04
     permissions:
-      contents: write # 必须赋予写入权限以创建 Release 和上传文件
+      contents: write
 
     steps:
       - name: Checkout Source Code
@@ -33,13 +33,13 @@ jobs:
           mv luci-app-quickfile openwrt/package/luci-app-quickfile
 
       - name: Update and Install Feeds
-        cd: openwrt
+        working-directory: openwrt
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Generate Configuration
-        cd: openwrt
+        working-directory: openwrt
         run: |
           echo "CONFIG_TARGET_x86=y" > .config
           echo "CONFIG_TARGET_x86_64=y" >> .config
@@ -47,7 +47,7 @@ jobs:
           make defconfig
 
       - name: Compile Package
-        cd: openwrt
+        working-directory: openwrt
         run: |
           make package/luci-app-quickfile/compile V=s -j$(nproc)
 
