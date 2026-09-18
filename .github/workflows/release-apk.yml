@@ -27,13 +27,16 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev
 
-      - name: Clone OpenWrt 25.12 Source
+      - name: Download OpenWrt 25.12 SDK
         run: |
-          git clone --depth 1 -b openwrt-25.12 https://git.openwrt.org/openwrt/openwrt.git openwrt
-          mv luci-app-quickfile openwrt/package/luci-app-quickfile
+          SDK_URL="https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/openwrt-sdk-25.12.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          wget $SDK_URL -O openwrt-sdk.tar.xz
+          mkdir sdk
+          tar -xf openwrt-sdk.tar.xz --strip-components=1 -C sdk
+          mv luci-app-quickfile sdk/package/luci-app-quickfile
 
       - name: Update and Install Feeds
-        working-directory: openwrt
+        working-directory: sdk
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -41,41 +44,26 @@ jobs:
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
-          path: openwrt/dl
-          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/include/kernel-*') }}
+          path: sdk/dl
+          key: ${{ runner.os }}-openwrt-sdk-dl-${{ hashFiles('sdk/include/kernel-*') }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-dl-
+            ${{ runner.os }}-openwrt-sdk-dl-
 
       - name: Generate Configuration
-        working-directory: openwrt
+        working-directory: sdk
         run: |
-          echo "CONFIG_TARGET_x86=y" > .config
-          echo "CONFIG_TARGET_x86_64=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
           make defconfig
 
-      - name: Download package sources
-        working-directory: openwrt
-        run: |
-          make download -j$(nproc)
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-
-      # 关键修复：构建基础宿主工具（例如生成 staging_dir/host/bin/sed）
-      - name: Compile Tools
-        working-directory: openwrt
-        run: |
-          make tools/install -j$(nproc) || make tools/install V=s -j1
-
       - name: Compile Package
-        working-directory: openwrt
+        working-directory: sdk
         run: |
           make package/luci-app-quickfile/compile V=s -j$(nproc) || make package/luci-app-quickfile/compile V=s -j1
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          find openwrt/bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+          find sdk/bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
 
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
