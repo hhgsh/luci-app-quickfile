@@ -53,7 +53,6 @@ jobs:
         working-directory: sdk
         run: |
           echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
-          # 禁用对不相关内核模块强校验，防止编译多余内核依赖
           echo "CONFIG_ALL_KMODS=n" >> .config
           echo "CONFIG_ALL_PATTERNS=n" >> .config
           make defconfig
@@ -61,19 +60,25 @@ jobs:
       - name: Compile Package
         working-directory: sdk
         run: |
-          # 加上 IGNORE_ERRORS=m 忽略非目标包的依赖警告
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc)
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          find sdk/bin/packages/ -type f \( -name "*.apk" -o -name "*.ipk" \) -exec cp {} output/ \;
+          # 仅匹配并复制 .apk 文件
+          find sdk/bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-quickfile-apk
+          path: output/*.apk
 
       - name: Create GitHub Release and Upload Artifacts
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: output/*
+          files: output/*.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
