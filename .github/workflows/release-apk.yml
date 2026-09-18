@@ -53,12 +53,16 @@ jobs:
         working-directory: sdk
         run: |
           echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
+          # 禁用对不相关内核模块强校验，防止编译多余内核依赖
+          echo "CONFIG_ALL_KMODS=n" >> .config
+          echo "CONFIG_ALL_PATTERNS=n" >> .config
           make defconfig
 
       - name: Compile Package
         working-directory: sdk
         run: |
-          make package/luci-app-quickfile/compile V=s -j$(nproc) || make package/luci-app-quickfile/compile V=s -j1
+          # 加上 IGNORE_ERRORS=m 忽略非目标包的依赖警告
+          make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc)
 
       - name: Organize Artifacts
         run: |
