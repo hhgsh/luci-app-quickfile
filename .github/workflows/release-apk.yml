@@ -27,16 +27,13 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd
 
-      - name: Download OpenWrt 24.10 SDK
+      - name: Clone OpenWrt 25.12 Source
         run: |
-          SDK_URL="https://downloads.openwrt.org/releases/24.10.0/targets/x86/64/openwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          wget $SDK_URL -O openwrt-sdk.tar.zst
-          mkdir sdk
-          tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
-          mv luci-app-quickfile sdk/package/luci-app-quickfile
+          git clone --depth 1 -b openwrt-25.12 https://git.openwrt.org/openwrt/openwrt.git openwrt
+          mv luci-app-quickfile openwrt/package/luci-app-quickfile
 
       - name: Update and Install Feeds
-        working-directory: sdk
+        working-directory: openwrt
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -44,37 +41,48 @@ jobs:
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
-          path: sdk/dl
-          key: ${{ runner.os }}-openwrt-sdk-dl-${{ hashFiles('sdk/include/kernel-*') }}
+          path: openwrt/dl
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/include/kernel-*') }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-sdk-dl-
+            ${{ runner.os }}-openwrt-dl-
 
-      - name: Generate Configuration
-        working-directory: sdk
+      - name: Generate Configuration for OpenWrt 25.12 (APK)
+        working-directory: openwrt
         run: |
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
+          echo "CONFIG_TARGET_x86=y" > .config
+          echo "CONFIG_TARGET_x86_64=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
+          # 关键点：开启 25.12 原生 APK 打包格式支持
+          echo "CONFIG_USE_APK=y" >> .config
           echo "CONFIG_ALL_KMODS=n" >> .config
           echo "CONFIG_ALL_PATTERNS=n" >> .config
           make defconfig
 
+      - name: Download package sources
+        working-directory: openwrt
+        run: |
+          make download -j$(nproc)
+          find dl -size -1024c -exec rm -f {} \;
+
       - name: Compile Package
-        working-directory: sdk
+        working-directory: openwrt
         run: |
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc)
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 仅匹配并复制 .apk 文件
-          find sdk/bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+          # 提取 25.12 下编译出的 .apk 文件
+          find openwrt/bin/ -type f -name "*.apk" -exec cp {} output/ \;
+          ls -la output/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-quickfile-apk
+          name: luci-app-quickfile-25.12-apk
           path: output/*.apk
 
-      - name: Create GitHub Release and Upload Artifacts
+      - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
