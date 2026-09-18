@@ -27,53 +27,36 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd
 
-      - name: Clone OpenWrt 25.12 Source
+      # 直接拉取 25.12 的官方快照 SDK 环境（内置了编译所需的全部 host 工具）
+      - name: Setup OpenWrt 25.12 SDK
         run: |
-          git clone --depth 1 -b openwrt-25.12 https://git.openwrt.org/openwrt/openwrt.git openwrt
-          mv luci-app-quickfile openwrt/package/luci-app-quickfile
+          SDK_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/openwrt-sdk-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          wget $SDK_URL -O openwrt-sdk.tar.zst
+          mkdir sdk
+          tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
+          mv luci-app-quickfile sdk/package/luci-app-quickfile
 
       - name: Update and Install Feeds
-        working-directory: openwrt
+        working-directory: sdk
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Cache OpenWrt dl
-        uses: actions/cache@v4
-        with:
-          path: openwrt/dl
-          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/include/kernel-*') }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-dl-
-
-      - name: Generate Configuration for OpenWrt 25.12 (APK)
-        working-directory: openwrt
+      - name: Generate Configuration
+        working-directory: sdk
         run: |
-          echo "CONFIG_TARGET_x86=y" > .config
-          echo "CONFIG_TARGET_x86_64=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
-          # 关键点：开启 25.12 原生 APK 打包格式支持
-          echo "CONFIG_USE_APK=y" >> .config
-          echo "CONFIG_ALL_KMODS=n" >> .config
-          echo "CONFIG_ALL_PATTERNS=n" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
           make defconfig
 
-      - name: Download package sources
-        working-directory: openwrt
-        run: |
-          make download -j$(nproc)
-          find dl -size -1024c -exec rm -f {} \;
-
       - name: Compile Package
-        working-directory: openwrt
+        working-directory: sdk
         run: |
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc)
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 提取 25.12 下编译出的 .apk 文件
-          find openwrt/bin/ -type f -name "*.apk" -exec cp {} output/ \;
+          find sdk/bin/ -type f -name "*.apk" -exec cp {} output/ \;
           ls -la output/
 
       - name: Upload Artifacts
