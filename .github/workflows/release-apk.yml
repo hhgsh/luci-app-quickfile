@@ -27,7 +27,6 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd
 
-      # 动态获取 25.12 最新 SDK 链接
       - name: Setup OpenWrt 25.12 SDK
         run: |
           SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
@@ -38,7 +37,6 @@ jobs:
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           mv luci-app-quickfile sdk/package/luci-app-quickfile
 
-      # 关键修复：仅更新并安装 luci feed，提供 luci.mk 依赖
       - name: Update and Install LuCI Feed
         working-directory: sdk
         run: |
@@ -59,7 +57,12 @@ jobs:
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          find sdk/bin/ -type f -name "*.apk" -exec cp {} output/ \;
+          # 仅精准提取核心服务、LuCI 界面和语言包这三个所需 .apk
+          find sdk/bin/ -type f \( \
+            -name "quickfile*.apk" -o \
+            -name "luci-app-quickfile*.apk" -o \
+            -name "luci-i18n-quickfile*.apk" \
+          \) -exec cp {} output/ \;
           ls -la output/
 
       - name: Upload Artifacts
