@@ -27,10 +27,13 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd
 
+      # 动态获取 25.12 最新 SDK 链接，解决 404 问题
       - name: Setup OpenWrt 25.12 SDK
         run: |
-          SDK_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/openwrt-sdk-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          wget $SDK_URL -O openwrt-sdk.tar.zst
+          SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
+          FULL_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/${SDK_URL}"
+          echo "Downloading SDK from: ${FULL_URL}"
+          wget "$FULL_URL" -O openwrt-sdk.tar.zst
           mkdir sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           mv luci-app-quickfile sdk/package/luci-app-quickfile
@@ -44,13 +47,11 @@ jobs:
       - name: Compile Package
         working-directory: sdk
         run: |
-          # 仅编译 quickfile 插件，开启 V=s 打印过程并忽略非关键依赖告警
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j1
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 搜寻编译出的所有 .apk 文件
           find sdk/bin/ -type f -name "*.apk" -exec cp {} output/ \;
           ls -la output/
 
