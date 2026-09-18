@@ -27,7 +27,7 @@ jobs:
           sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
             gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd
 
-      # 动态获取 25.12 最新 SDK 链接，解决 404 问题
+      # 动态获取 25.12 最新 SDK 链接
       - name: Setup OpenWrt 25.12 SDK
         run: |
           SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
@@ -37,6 +37,13 @@ jobs:
           mkdir sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           mv luci-app-quickfile sdk/package/luci-app-quickfile
+
+      # 关键修复：仅更新并安装 luci feed，提供 luci.mk 依赖
+      - name: Update and Install LuCI Feed
+        working-directory: sdk
+        run: |
+          ./scripts/feeds update luci
+          ./scripts/feeds install -a -p luci
 
       - name: Generate Configuration
         working-directory: sdk
