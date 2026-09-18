@@ -38,7 +38,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 使用 GitHub Actions Cache 缓存 dl 目录，避免重复下载源码包
       - name: Cache OpenWrt dl
         uses: actions/cache@v4
         with:
@@ -62,10 +61,15 @@ jobs:
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
+      # 关键修复：构建基础宿主工具（例如生成 staging_dir/host/bin/sed）
+      - name: Compile Tools
+        working-directory: openwrt
+        run: |
+          make tools/install -j$(nproc) || make tools/install V=s -j1
+
       - name: Compile Package
         working-directory: openwrt
         run: |
-          # 仅直接编译单个 package 及其必要依赖，无需手动执行 make tools/install 和 toolchain/install
           make package/luci-app-quickfile/compile V=s -j$(nproc) || make package/luci-app-quickfile/compile V=s -j1
 
       - name: Organize Artifacts
