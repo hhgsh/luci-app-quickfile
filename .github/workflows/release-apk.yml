@@ -36,19 +36,20 @@ jobs:
           mkdir sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           
-          # 将当前源码放到 SDK package 目录
+          # 1. 移动当前仓库到 package 目录
           mv luci-app-quickfile sdk/package/luci-app-quickfile
           
-          # 如果 quickfile 的 Makefile 已经包含在 luci-app-quickfile 源码内部（例如在 quickfile 文件夹或同级目录下）
-          # 请确保它被正确放置在 sdk/package/quickfile 中：
+          # 2. 从当前仓库中将 quickfile 核心服务的 Makefile/files 复制出独立的 package 目录
           if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
             cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
           fi
 
-      - name: Update and Install LuCI Feed
+      - name: Update and Install Feeds
         working-directory: sdk
         run: |
-          ./scripts/feeds update luci
+          # 最新版本的 quickfile 依赖 Rust 编译环境，必须安装 packages feed 中的 rust 插件
+          ./scripts/feeds update packages luci
+          ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
 
       - name: Generate Configuration
@@ -61,15 +62,14 @@ jobs:
       - name: Compile Package
         working-directory: sdk
         run: |
-          # 优先编译核心二进制服务 quickfile
+          # 编译 quickfile (Rust 后端) 及 LuCI 前端界面
           make package/quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/quickfile/compile V=s IGNORE_ERRORS=m -j1
-          # 编译 LuCI 界面及语言包
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j1
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 仅精准提取核心服务、LuCI 界面和语言包这三个所需 .apk
+          # 精准提取生成的 apk 文件
           find sdk/bin/ -type f \( \
             -name "quickfile*.apk" -o \
             -name "luci-app-quickfile*.apk" -o \
@@ -77,7 +77,6 @@ jobs:
           \) -exec cp {} output/ \;
           ls -la output/
 
-      # 动态生成 Release 标签名（如果是手动触发，自动带上时间戳标签）
       - name: Generate Release Tag Name
         id: tag
         run: |
@@ -87,7 +86,6 @@ jobs:
             echo "RELEASE_TAG=v25.12-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
           fi
 
-      # 无论何种触发方式，统一发布 GitHub Release 并在发布页面上传 APK
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
