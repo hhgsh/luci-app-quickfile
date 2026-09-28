@@ -35,7 +35,15 @@ jobs:
           wget "$FULL_URL" -O openwrt-sdk.tar.zst
           mkdir sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
+          
+          # 将当前源码放到 SDK package 目录
           mv luci-app-quickfile sdk/package/luci-app-quickfile
+          
+          # 如果 quickfile 的 Makefile 已经包含在 luci-app-quickfile 源码内部（例如在 quickfile 文件夹或同级目录下）
+          # 请确保它被正确放置在 sdk/package/quickfile 中：
+          if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
+            cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
+          fi
 
       - name: Update and Install LuCI Feed
         working-directory: sdk
@@ -46,12 +54,16 @@ jobs:
       - name: Generate Configuration
         working-directory: sdk
         run: |
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
+          echo "CONFIG_PACKAGE_quickfile=m" > .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
           make defconfig
 
       - name: Compile Package
         working-directory: sdk
         run: |
+          # 优先编译核心二进制服务 quickfile
+          make package/quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/quickfile/compile V=s IGNORE_ERRORS=m -j1
+          # 编译 LuCI 界面及语言包
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j1
 
       - name: Organize Artifacts
