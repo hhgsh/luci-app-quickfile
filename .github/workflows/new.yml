@@ -35,10 +35,8 @@ jobs:
           wget "$FULL_URL" -O openwrt-sdk.tar.zst
           mkdir sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
-          
           # 1. 移动当前仓库到 package 目录
           mv luci-app-quickfile sdk/package/luci-app-quickfile
-          
           # 2. 将本地 quickfile 复制出独立的 package 目录
           if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
             cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
@@ -81,12 +79,26 @@ jobs:
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 精准提取生成的 3 个 .apk 文件
+          # 精准提取生成的 apk 文件并复制到 output 目录
           find sdk/bin/ -type f \( \
             -name "quickfile*.apk" -o \
             -name "luci-app-quickfile*.apk" -o \
             -name "luci-i18n-quickfile*.apk" \
           \) -exec cp {} output/ \;
+
+          # 针对 luci-i18n-quickfile，将版本分隔符 .3d15524 等自动替换为 ~
+          cd output
+          for file in luci-i18n-quickfile-*.apk; do
+            if [ -f "$file" ]; then
+              newfile=$(echo "$file" | sed -E 's/([0-9]+)\.([0-9a-f]{7}\.apk)$/\1~\2/')
+              if [ "$file" != "$newfile" ]; then
+                mv "$file" "$newfile"
+                echo "Renamed $file to $newfile"
+              fi
+            fi
+          done
+          cd ..
+
           ls -la output/
 
       - name: Generate Release Tag Name
