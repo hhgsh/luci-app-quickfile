@@ -39,7 +39,7 @@ jobs:
           # 1. 移动当前仓库到 package 目录
           mv luci-app-quickfile sdk/package/luci-app-quickfile
           
-          # 2. 将本地 quickfile 复制出独立的 package 目录
+          # 2. 从当前仓库中将 quickfile 核心服务的 Makefile/files 复制出独立的 package 目录
           if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
             cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
           fi
@@ -47,20 +47,10 @@ jobs:
       - name: Update and Install Feeds
         working-directory: sdk
         run: |
+          # 最新版本的 quickfile 依赖 Rust 编译环境，必须安装 packages feed 中的 rust 插件
           ./scripts/feeds update packages luci
           ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
-
-      # ⚡【关键优化点 1】：加入缓存逻辑，复用编译好的 Rust/LLVM 宿主工具链及 SDK 源码包
-      - name: Cache SDK Build Tools and Downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            sdk/dl
-            sdk/staging_dir/host
-          key: ${{ runner.os }}-openwrt-rust-host-${{ hashFiles('sdk/feeds/packages/lang/rust/**') }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-rust-host-
 
       - name: Generate Configuration
         working-directory: sdk
@@ -69,19 +59,17 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
           make defconfig
 
-      # ⚡【关键优化点 2】：只精准编译 quickfile 和 luci-app-quickfile，避免多余依赖扫描
       - name: Compile Package
         working-directory: sdk
         run: |
-          # 优先编译 Rust 核心后端服务
+          # 编译 quickfile (Rust 后端) 及 LuCI 前端界面
           make package/quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/quickfile/compile V=s IGNORE_ERRORS=m -j1
-          # 再编译 LuCI 前端界面及语言包
           make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j$(nproc) || make package/luci-app-quickfile/compile V=s IGNORE_ERRORS=m -j1
 
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 精准提取生成的 3 个 .apk 文件
+          # 精准提取生成的 apk 文件
           find sdk/bin/ -type f \( \
             -name "quickfile*.apk" -o \
             -name "luci-app-quickfile*.apk" -o \
