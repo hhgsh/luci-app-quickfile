@@ -1,4 +1,4 @@
-name: Build quickfile
+name: Build quickfile2.x
 
 on:
   push:
