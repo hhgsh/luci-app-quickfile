@@ -48,10 +48,11 @@ jobs:
           # 复制当前仓库文件到 SDK package 目录
           cp -r $GITHUB_WORKSPACE sdk/package/luci-app-quickfile
           if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
-            cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
+          cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
           fi
-          
-          # 将编译好的二进制强塞给 SDK
+
+          # 确保目标目录存在，再写入二进制文件
+          mkdir -p sdk/package/quickfile
           cp $GITHUB_WORKSPACE/quickfile-src-2.0.5/target/x86_64-unknown-linux-musl/release/quickfile sdk/package/quickfile/quickfile
           chmod +x sdk/package/quickfile/quickfile
 
