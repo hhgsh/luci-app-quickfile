@@ -15,116 +15,74 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-        with:
-          path: 'luci-app-quickfile'
 
-      # 1. 清理磁盘空间
-      - name: Free Disk Space
+      # 1. 安装 Rust 环境与 cross 交叉编译工具
+      - name: Install Rust and Cross
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-          sudo apt-get clean
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          cargo install cross --git https://github.com/cross-rs/cross
 
-      # 2. 安装必要构建依赖
-      - name: Install Dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang flex bison gcc-multilib g++-multilib \
-            gettext git libssl-dev libncurses5-dev libncursesw5-dev \
-            python3 python3-pip rsync unzip zlib1g-dev zstd ccache
-
-      # 3. 缓存 OpenWrt SDK 下载文件 & Rust/Cargo 构建中间产物
-      - name: Cache OpenWrt SDK & Cargo
+      # 2. 缓存 Cargo 依赖（大幅提速二次构建）
+      - name: Cache Cargo Dependencies
         uses: actions/cache@v4
         with:
           path: |
-            openwrt-sdk.tar.zst
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            sdk/dl/
-            sdk/build_dir/target-*/ccache
-          key: ${{ runner.os }}-openwrt-quickfile-${{ hashFiles('luci-app-quickfile/**/Makefile', 'luci-app-quickfile/**/Cargo.lock') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-quickfile-
+            ${{ runner.os }}-cargo-
 
-      # 4. 下载并解压 SDK（若已有缓存则跳过下载）
-      - name: Setup OpenWrt 25.12 SDK
+      # 3. 极速交叉编译 Rust 核心二进制
+      - name: Build Quickfile Core
         run: |
-          if [ ! -f "openwrt-sdk.tar.zst" ]; then
-            SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
-            FULL_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/${SDK_URL}"
-            echo "Downloading SDK from: ${FULL_URL}"
-            wget "$FULL_URL" -O openwrt-sdk.tar.zst
+          if [ -d "quickfile" ]; then
+            cd quickfile
           fi
+          cross build --target x86_64-unknown-linux-musl --release
 
+      # 4. 下载并配置 OpenWrt SDK
+      - name: Setup OpenWrt SDK
+        run: |
+          SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
+          wget "https://downloads.openwrt.org/snapshots/targets/x86/64/${SDK_URL}" -O openwrt-sdk.tar.zst
           mkdir -p sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           
-          # 移动源码及子包
-          cp -r luci-app-quickfile sdk/package/luci-app-quickfile
-          if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
-            cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
-          fi
+          # 将源码移入 SDK package 目录
+          cp -r $GITHUB_WORKSPACE sdk/package/luci-app-quickfile
 
-      # 5. 更新并安装 Feeds
-      - name: Update and Install Feeds
+      # 5. 更新 Feeds 并设置最小化配置
+      - name: Update Feeds and Config
         working-directory: sdk
         run: |
           ./scripts/feeds update packages luci
           ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
-
-      # 6. 生成极简配置（只激活必要包，避免额外内核驱动报错）
-      - name: Generate Configuration
-        working-directory: sdk
-        run: |
-          echo "CONFIG_PACKAGE_quickfile=m" > .config
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
-          echo "CONFIG_DEVEL=y" >> .config
-          echo "CONFIG_CCACHE=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" > .config
           make defconfig
 
-      # 7. 精确且高效地并行编译目标包
+      # 6. 打包 APK（由于二进制已编好，此步骤几秒内即可完成）
       - name: Compile Package
         working-directory: sdk
         run: |
-          NPROC=$(nproc)
-          echo "Compiling with $NPROC threads..."
-          
-          # 仅精准编译目标的两个包，避免引发全量/无关内核模块的构建错误
-          make package/quickfile/compile V=s -j$NPROC BUILD_LOG=1 || make package/quickfile/compile V=s -j1
-          make package/luci-app-quickfile/compile V=s -j$NPROC BUILD_LOG=1 || make package/luci-app-quickfile/compile V=s -j1
+          make package/luci-app-quickfile/compile V=s -j$(nproc)
 
-      # 8. 收集打包文件
+      # 7. 收集生成的 APK 文件
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          find sdk/bin/ -type f \( \
-            -name "quickfile*.apk" -o \
-            -name "luci-app-quickfile*.apk" -o \
-            -name "luci-i18n-quickfile*.apk" \
-          \) -exec cp {} output/ \;
+          find sdk/bin/ -type f -name "*.apk" -exec cp {} output/ \;
           ls -la output/
 
-      # 9. 确定 Release Tag
-      - name: Generate Release Tag Name
-        id: tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "RELEASE_TAG=${github.ref_name}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_TAG=v25.12-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
-          fi
-
-      # 10. 发布 Release
-      - name: Create GitHub Release and Upload APK
+      # 8. 发布 Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "Quickfile OpenWrt 25.12 APK (${{ env.RELEASE_TAG }})"
+          tag_name: "v25.12-$(date +'%Y%m%d-%H%M')"
+          name: "Quickfile OpenWrt 25.12 APK"
           files: output/*.apk
           generate_release_notes: true
         env:
