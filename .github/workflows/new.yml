@@ -29,11 +29,12 @@ jobs:
       # 2. 下载 2.0.5 源码包并在 Ubuntu 原生环境中几分钟完成 Rust 极速编译
       - name: Build Rust Binary
         run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
           wget https://r2.cooluc.com/source/quickfile-src-2.0.5.tar.xz
           tar -xf quickfile-src-2.0.5.tar.xz
           cd quickfile-src-2.0.5
-          cargo build --release --target x86_64-unknown-linux-musl
+          CC_x86_64_unknown_linux_musl=musl-gcc cargo build --release --target x86_64-unknown-linux-musl
 
       # 3. 准备 OpenWrt SDK 并复制预编译好的二进制文件
       - name: Setup OpenWrt SDK
