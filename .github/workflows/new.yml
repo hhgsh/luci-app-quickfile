@@ -1,4 +1,4 @@
-name: Build quickfile 2.x
+name: Build quickfile 2.0x
 
 on:
   push:
@@ -15,21 +15,8 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-        with:
-          path: 'luci-app-quickfile'
 
-      - name: Initialization Environment
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-          sudo apt-get update
-          # 【修改点 1】: 添加 rustc 和 cargo，提前给 Ubuntu 准备好原生的 Rust 环境
-          sudo apt-get install -y build-essential clang flex bison gcc-multilib g++-multilib \
-            gettext git libssl-dev libncurses5-dev libncursesw5-dev python3 python3-pip rsync unzip zlib1g-dev zstd \
-            rustc cargo ccache
-
-      # 【修改点 2】: 增加 Cargo 缓存。只要成功编译过一次，下次编译 Rust 代码速度起飞
+      # 1. 缓存 Cargo 依赖
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4
         with:
@@ -37,54 +24,54 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('luci-app-quickfile/**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-2.0.5
 
-      - name: Setup OpenWrt 25.12 SDK
+      # 2. 下载 2.0.5 源码包并在 Ubuntu 原生环境中几分钟完成 Rust 极速编译
+      - name: Build Rust Binary
         run: |
-          SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
-          FULL_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/${SDK_URL}"
-          echo "Downloading SDK from: ${FULL_URL}"
-          wget "$FULL_URL" -O openwrt-sdk.tar.zst
+          rustup target add x86_64-unknown-linux-musl
+          wget https://r2.cooluc.com/source/quickfile-src-2.0.5.tar.xz
+          tar -xf quickfile-src-2.0.5.tar.xz
+          cd quickfile-src-2.0.5
+          cargo build --release --target x86_64-unknown-linux-musl
+
+      # 3. 准备 OpenWrt SDK 并复制预编译好的二进制文件
+      - name: Setup OpenWrt SDK
+        run: |
+          sudo apt-get update && sudo apt-get install -y build-essential clang flex bison g++ gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3 rsync unzip zlib1g-dev zstd
           
-          mkdir sdk
+          SDK_URL=$(curl -s https://downloads.openwrt.org/snapshots/targets/x86/64/ | grep -oE 'openwrt-sdk-[^"]*\.tar\.zst' | head -n 1)
+          wget "https://downloads.openwrt.org/snapshots/targets/x86/64/${SDK_URL}" -O openwrt-sdk.tar.zst
+          mkdir -p sdk
           tar --zstd -xf openwrt-sdk.tar.zst --strip-components=1 -C sdk
           
-          # 完全保留你原有的移动和拷贝逻辑
-          # 1. 移动当前仓库到 package 目录
-          mv luci-app-quickfile sdk/package/luci-app-quickfile
-          # 2. 从当前仓库中将 quickfile 核心服务的 Makefile/files 复制出独立的 package 目录
+          # 复制当前仓库文件到 SDK package 目录
+          cp -r $GITHUB_WORKSPACE sdk/package/luci-app-quickfile
           if [ -d "sdk/package/luci-app-quickfile/quickfile" ]; then
             cp -r sdk/package/luci-app-quickfile/quickfile sdk/package/quickfile
           fi
+          
+          # 将编译好的二进制强塞给 SDK
+          cp $GITHUB_WORKSPACE/quickfile-src-2.0.5/target/x86_64-unknown-linux-musl/release/quickfile sdk/package/quickfile/quickfile
+          chmod +x sdk/package/quickfile/quickfile
 
-      - name: Update and Install Feeds
+      # 4. 配置 SDK 并极速打包
+      - name: Package APK
         working-directory: sdk
         run: |
-          # 最新版本的 quickfile 依赖 Rust 编译环境，必须安装 packages feed 中的 rust 插件
-          ./scripts/feeds update packages luci
-          ./scripts/feeds install -a -p packages
+          ./scripts/feeds update luci
           ./scripts/feeds install -a -p luci
-
-      - name: Generate Configuration
-        working-directory: sdk
-        run: |
           echo "CONFIG_PACKAGE_quickfile=m" > .config
           echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
           make defconfig
+          
+          make package/quickfile/compile V=s
+          make package/luci-app-quickfile/compile V=s
 
-      - name: Compile Package
-        working-directory: sdk
-        run: |
-          # 【修改点 3】: 注入 RUSTC=rustc CARGO=cargo 强制 SDK 借用系统自带的 Rust 工具链，直接跳过 SDK 内部痛苦的 LLVM 从源码编译环节
-          make package/quickfile/compile V=s -j$(nproc) RUSTC=rustc CARGO=cargo || make package/quickfile/compile V=s -j1 RUSTC=rustc CARGO=cargo
-          make package/luci-app-quickfile/compile V=s -j$(nproc) RUSTC=rustc CARGO=cargo || make package/luci-app-quickfile/compile V=s -j1 RUSTC=rustc CARGO=cargo
-
+      # 5. 收集 APK 结果
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 精准提取生成的 apk 文件
           find sdk/bin/ -type f \( \
             -name "quickfile*.apk" -o \
             -name "luci-app-quickfile*.apk" -o \
@@ -92,7 +79,8 @@ jobs:
           \) -exec cp {} output/ \;
           ls -la output/
 
-      - name: Generate Release Tag Name
+      # 6. 发布 Release
+      - name: Generate Release Tag
         id: tag
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
@@ -101,7 +89,7 @@ jobs:
             echo "RELEASE_TAG=v25.12-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
           fi
 
-      - name: Create GitHub Release and Upload APK
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
