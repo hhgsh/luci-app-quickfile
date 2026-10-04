@@ -1,4 +1,4 @@
-name: Build quickfile 2.x
+name: Build quickfile
 
 on:
   push:
@@ -18,13 +18,13 @@ jobs:
         with:
           path: 'luci-app-quickfile'
 
-      # 1. 快速清理磁盘空间，释放编译内存/存储空间
+      # 1. 清理磁盘空间
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 2. 安装必要构建依赖（移除不必要的包）
+      # 2. 安装必要构建依赖
       - name: Install Dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -50,7 +50,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-quickfile-
 
-      # 4. 下载并解压 SDK（如果已存在缓存则跳过下载）
+      # 4. 下载并解压 SDK（若已有缓存则跳过下载）
       - name: Setup OpenWrt 25.12 SDK
         run: |
           if [ ! -f "openwrt-sdk.tar.zst" ]; then
@@ -77,7 +77,7 @@ jobs:
           ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
 
-      # 6. 生成配置并开启 ccache 支持
+      # 6. 生成极简配置（只激活必要包，避免额外内核驱动报错）
       - name: Generate Configuration
         working-directory: sdk
         run: |
@@ -87,16 +87,16 @@ jobs:
           echo "CONFIG_CCACHE=y" >> .config
           make defconfig
 
-      # 7. 高效并行编译
+      # 7. 精确且高效地并行编译目标包
       - name: Compile Package
         working-directory: sdk
         run: |
           NPROC=$(nproc)
           echo "Compiling with $NPROC threads..."
           
-          # 优先尝试多线程快速编译，失败后再回退单线程排错
-          make package/quickfile/compile V=s -j$NPROC || make package/quickfile/compile V=s -j1
-          make package/luci-app-quickfile/compile V=s -j$NPROC || make package/luci-app-quickfile/compile V=s -j1
+          # 仅精准编译目标的两个包，避免引发全量/无关内核模块的构建错误
+          make package/quickfile/compile V=s -j$NPROC BUILD_LOG=1 || make package/quickfile/compile V=s -j1
+          make package/luci-app-quickfile/compile V=s -j$NPROC BUILD_LOG=1 || make package/luci-app-quickfile/compile V=s -j1
 
       # 8. 收集打包文件
       - name: Organize Artifacts
